@@ -39,16 +39,17 @@ class SalesInvoice(AuditableModel):
     )
     subtotal = models.DecimalField(
         _("Subtotal"), max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text=_("Total before taxes and discounts. Often calculated from lines.")
+        help_text=_("Total before taxes and discounts. Calculated from lines.")
     )
     tax_amount = models.DecimalField(
         _("Tax Amount"), max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text=_("Total tax amount. Often calculated.")
+        help_text=_("Total tax amount. Calculated.")
     )
     total_amount = models.DecimalField(
         _("Total Amount"), max_digits=15, decimal_places=2, default=Decimal('0.00'),
-        help_text=_("Total amount due (subtotal + tax). Often calculated.")
+        help_text=_("Total amount due (subtotal + tax). Calculated.")
     )
+    # This field might be updated manually or via payment linking logic later
     amount_paid = models.DecimalField(
         _("Amount Paid"), max_digits=15, decimal_places=2, default=Decimal('0.00')
     )
@@ -63,28 +64,51 @@ class SalesInvoice(AuditableModel):
     def __str__(self):
         return f"Invoice {self.invoice_number} ({self.customer})"
 
-    def calculate_totals(self):
-        """ Recalculates subtotal, tax, and total from lines. """
-        lines = self.lines.all()
-        self.subtotal = sum(line.line_total for line in lines if line.line_total is not None)
-        # Add tax calculation logic here later if needed
-        # self.tax_amount = ...
-        self.total_amount = self.subtotal + self.tax_amount # Adjust logic as needed
-        # self.save(update_fields=['subtotal', 'tax_amount', 'total_amount']) # Be careful with recursion
+    def calculate_totals(self, save=True):
+        """
+        Recalculates subtotal, tax, and total from lines.
+        IMPORTANT: This provides a basic structure. Real tax calculation
+                   needs specific business logic (VAT rates, rules etc.)
+        """
+        lines = self.lines.all() # Use related_name 'lines' from SalesInvoiceLine
+        new_subtotal = sum(line.line_total for line in lines if line.line_total is not None)
+
+        # --- Placeholder Tax Calculation ---
+        # Replace this with your actual tax logic based on Philippine rules.
+        # This might involve checking product tax codes, customer status, etc.
+        new_tax_amount = Decimal('0.00')
+        # Example: Simple VAT calculation (assuming exclusive VAT)
+        # tax_rate = Decimal('0.12') # Example 12% VAT
+        # new_tax_amount = sum(line.line_total * tax_rate for line in lines if line.line_total is not None and line.is_vatable) # Assuming is_vatable field on line
+        # --- End Placeholder ---
+
+        new_total_amount = new_subtotal + new_tax_amount
+
+        # Check if update is needed before saving
+        updated_fields = []
+        if self.subtotal != new_subtotal:
+            self.subtotal = new_subtotal
+            updated_fields.append('subtotal')
+        if self.tax_amount != new_tax_amount:
+            self.tax_amount = new_tax_amount
+            updated_fields.append('tax_amount')
+        if self.total_amount != new_total_amount:
+            self.total_amount = new_total_amount
+            updated_fields.append('total_amount')
+
+        if save and updated_fields:
+            # Save only the fields that changed to prevent recursive signals if possible
+            self.save(update_fields=updated_fields)
 
     @property
     def balance_due(self):
         return self.total_amount - self.amount_paid
 
-    # Consider adding validation (e.g., due_date >= invoice_date) in clean() method
-
-
 class SalesInvoiceLine(models.Model):
     """ Line item detail for a Sales Invoice. """
-    # No need for AuditableModel here unless tracking line item changes specifically
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(
-        SalesInvoice, on_delete=models.CASCADE, related_name='lines',
+        SalesInvoice, on_delete=models.CASCADE, related_name='lines', # related_name is crucial
         verbose_name=_("Sales Invoice")
     )
     product = models.ForeignKey(
@@ -101,13 +125,12 @@ class SalesInvoiceLine(models.Model):
         _("Unit Price"), max_digits=15, decimal_places=2,
         validators=[MinValueValidator(Decimal('0.00'))]
     )
-    # Add discount fields/logic later if needed (e.g., discount_percent, discount_amount)
     line_total = models.DecimalField(
-        _("Line Total"), max_digits=15, decimal_places=2, null=True, blank=True,
-        help_text=_("Calculated as Quantity * Unit Price (potentially less discounts).")
+        _("Line Total (Exclusive of Tax)"), max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text=_("Calculated as Quantity * Unit Price.")
     )
-    # Optional: Link line item directly to a revenue account (overrides product default)
-    # account = models.ForeignKey(ChartOfAccounts, on_delete=models.SET_NULL, null=True, blank=True, ...)
+    # Optional: Add fields like is_vatable if needed for line-level tax calculation
+    # is_vatable = models.BooleanField(_("Is VATable?"), default=True)
 
     class Meta:
         verbose_name = _("Sales Invoice Line")
@@ -115,13 +138,11 @@ class SalesInvoiceLine(models.Model):
         ordering = ['invoice', 'id'] # Order lines by their invoice and creation order
 
     def save(self, *args, **kwargs):
-        # Calculate line total automatically
+        # Calculate line total automatically before saving
         if self.quantity is not None and self.unit_price is not None:
-            self.line_total = self.quantity * self.unit_price # Add discount logic later
+            self.line_total = self.quantity * self.unit_price
         super().save(*args, **kwargs)
-        # Optional: Trigger recalculation of parent invoice totals after saving line
-        # self.invoice.calculate_totals()
-        # self.invoice.save() # Be careful with signals or overriding save to prevent infinite loops
+        # The post_save signal connected in signals.py will handle updating the parent invoice totals
 
     def __str__(self):
         return f"Line for Invoice {self.invoice.invoice_number}: {self.description[:50]}"

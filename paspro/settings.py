@@ -11,24 +11,21 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
-import os # Import os module if you plan to use environment variables for secrets
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-# It's recommended to load this from an environment variable or a secrets file in production
-SECRET_KEY = 'django-insecure---q+zqn4hl3r*zbm_t&u(01-tfmxgl_8wj5$#qbj8lieyn9lvw' # Replace with a real random key
+SECRET_KEY = 'django-insecure-=+your_unique_secret_key_here!# M@k3Th!sUn!qu3' # Replace with your actual key
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True # Keep True for development, set to False for production
+DEBUG = True
 
-ALLOWED_HOSTS = [] # Keep empty for local development, configure for production
-
+ALLOWED_HOSTS = []
 
 # Application definition
 
@@ -40,20 +37,20 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    # Third-party apps (if any added later)
+    # Third-party apps
+    'import_export', # Add django-import-export
 
     # Our PASPRO apps
     'core.apps.CoreConfig',
     'accounts.apps.AccountsConfig',
     'persons.apps.PersonsConfig',
-    'projects.apps.ProjectsConfig',   # <-- Add this line
-    'inventory.apps.InventoryConfig', # <-- Add this line
+    'projects.apps.ProjectsConfig',
+    'inventory.apps.InventoryConfig',
     'sales.apps.SalesConfig',
     'purchases.apps.PurchasesConfig',
-    # Add other apps here as they are created
+    'payments.apps.PaymentsConfig', # Add payments app
 
 ]
-
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -70,7 +67,7 @@ ROOT_URLCONF = 'paspro.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'], # Add a project-level templates directory
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -85,76 +82,49 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'paspro.wsgi.application'
 
-
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-# --- PostgreSQL Configuration ---
-# Replace with your actual database details
-# Consider using environment variables for security in real projects
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'paspro_db',          # The database name you created
-        'USER': 'paspro_user',          # The database user you created
-        'PASSWORD': 'Sultanx90!Hy', # The password for the user
-        'HOST': 'localhost',            # Or your DB server IP/hostname if not local
-        'PORT': '5432',                 # Default PostgreSQL port
+        'NAME': 'paspro_db',
+        'USER': 'paspro_user',
+        'PASSWORD': 'Sultanx90!Hy', # Replace with your password
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
 }
-# --- End PostgreSQL Configuration ---
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',},
 ]
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
 
 LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'Asia/Manila' # Set to your local time zone
-
+TIME_ZONE = 'Asia/Manila' # Your time zone
 USE_I18N = True
-
-USE_TZ = True # Recommended for handling time zones correctly
-
+USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.0/howto/static-files/
 
 STATIC_URL = 'static/'
-# Add this line to specify where collected static files will go in production
 # STATIC_ROOT = BASE_DIR / 'staticfiles'
-# Add this line if you have project-wide static files (not app-specific)
 # STATICFILES_DIRS = [BASE_DIR / "static"]
-
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# User Model (Using Django's default for now)
-# AUTH_USER_MODEL = 'users.CustomUser' # We might use this later if needed
-
-# Login URLs (useful later)
-# LOGIN_URL = 'login'
-# LOGIN_REDIRECT_URL = 'dashboard' # Example, assumes a dashboard url name
-# LOGOUT_REDIRECT_URL = 'login' # Example
+# django-import-export settings (optional, defaults are usually fine)
+IMPORT_EXPORT_USE_TRANSACTIONS = True
