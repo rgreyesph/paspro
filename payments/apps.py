@@ -6,6 +6,9 @@ class PaymentsConfig(AppConfig):
     name = 'payments'
     verbose_name = _("Payments")
 
-    # No signals defined in this app *yet*
-    # def ready(self):
-    #     import payments.signals
+    def ready(self):
+        """ Import and connect signals when the app is ready. """
+        try:
+            import payments.signals # noqa F401: Import signals to connect them
+        except ImportError:
+            pass
