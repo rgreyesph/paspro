@@ -13,7 +13,6 @@ class PaymentReceivedAdmin(ImportExportModelAdmin):
     readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
     date_hierarchy = 'payment_date'
     autocomplete_fields = ('customer', 'account_deposited_to', 'invoices', 'created_by', 'updated_by')
-    # Use filter_horizontal for ManyToMany 'invoices' and 'tags'
     filter_horizontal = ('invoices', 'tags')
 
     fieldsets = (
@@ -24,7 +23,9 @@ class PaymentReceivedAdmin(ImportExportModelAdmin):
     )
 
     def save_model(self, request, obj, form, change):
-        if not obj.pk: obj.created_by = request.user
+        """ Auto-populate audit fields """
+        if not obj.pk:
+             obj.created_by = request.user
         obj.updated_by = request.user
         super().save_model(request, obj, form, change)
         # TODO: Add logic here or via signal to update related Invoice amount_paid
@@ -39,22 +40,26 @@ class PaymentMadeAdmin(ImportExportModelAdmin):
     search_fields = (
         'vendor__name', 'employee__first_name', 'employee__last_name', 'other_payee_name',
         'reference_number', 'notes', 'bills__bill_number', 'disbursement_voucher__dv_number',
-        'employee_advance_issued__employee__first_name' # Search related advance employee
+        # Add back search for related advance employee
+        'employee_advance_issued__employee__first_name',
+        'employee_advance_issued__employee__last_name'
     )
     readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
     date_hierarchy = 'payment_date'
     autocomplete_fields = (
         'vendor', 'employee', 'account_paid_from', 'disbursement_voucher',
-        'employee_advance_issued', 'bills', 'created_by', 'updated_by'
+        # Add back employee_advance_issued to autocomplete
+        'employee_advance_issued',
+        'bills', 'created_by', 'updated_by'
     )
-    # Use filter_horizontal for ManyToMany 'bills' and 'tags'
     filter_horizontal = ('bills', 'tags')
 
+    # Add back employee_advance_issued to the fieldsets
     fieldsets = (
         (None, {'fields': ('payment_date', 'amount', 'account_paid_from')}),
         ('Payee', {'fields': ('payee_type', 'vendor', 'employee', 'other_payee_name')}),
         ('Payment Details', {'fields': ('payment_method', 'reference_number')}),
-        ('Related Documents', {'fields': ('bills', 'disbursement_voucher', 'employee_advance_issued')}),
+        ('Related Documents', {'fields': ('bills', 'disbursement_voucher', 'employee_advance_issued')}), # Add back here
         ('Auditing & Categorization', {'fields': ('notes', 'tags', 'created_at', 'created_by', 'updated_at', 'updated_by')}),
     )
 
@@ -63,7 +68,9 @@ class PaymentMadeAdmin(ImportExportModelAdmin):
         return obj.get_payee_name()
 
     def save_model(self, request, obj, form, change):
-        if not obj.pk: obj.created_by = request.user
+        """ Auto-populate audit fields """
+        if not obj.pk:
+            obj.created_by = request.user
         obj.updated_by = request.user
         super().save_model(request, obj, form, change)
         # TODO: Add logic here or via signal to update related Bill amount_paid or Advance status

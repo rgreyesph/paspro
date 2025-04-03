@@ -1,20 +1,19 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
-from django.utils import timezone # For date calculations
-from datetime import timedelta # For date calculations
-from django.core.exceptions import ValidationError # For validation
-from core.models import Address, Tag, AuditableModel
+# Removed timezone and timedelta imports as they are no longer needed here
+# from django.utils import timezone
+# from datetime import timedelta
+from django.core.exceptions import ValidationError
+# Import Address, Tag directly; AuditableModel not directly used here anymore
+from core.models import Address, Tag
 from accounts.models import ChartOfAccounts
-# Removed direct import: from projects.models import Project
+# Removed import of Project
+# from projects.models import Project
 import uuid
 from decimal import Decimal
 
-# --- Function for default due date ---
-def get_default_advance_due_date():
-    """ Returns the date 7 days from now. """
-    return timezone.now().date() + timedelta(days=7)
-# --- End Function ---
+# NOTE: EmployeeAdvance model was moved to accounts.models.py
 
 class Employee(models.Model):
     """ Represents an employee of the company. """
@@ -67,37 +66,3 @@ class Customer(models.Model):
     created_at = models.DateTimeField(auto_now_add=True); updated_at = models.DateTimeField(auto_now=True)
     class Meta: verbose_name = _("Customer"); verbose_name_plural = _("Customers"); ordering = ['name']
     def __str__(self): return self.name
-
-class EmployeeAdvance(AuditableModel):
-    """ Tracks cash advances given to employees and their liquidation/repayment. """
-    class AdvanceStatus(models.TextChoices): ISSUED = 'ISSUED', _('Issued'); PARTIALLY_LIQUIDATED = 'PARTIALLY_LIQUIDATED', _('Partially Liquidated/Repaid'); LIQUIDATED = 'LIQUIDATED', _('Fully Liquidated/Repaid'); CANCELLED = 'CANCELLED', _('Cancelled')
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, verbose_name=_("Employee"), related_name="advances")
-    date_issued = models.DateField(_("Date Issued"), default=timezone.now, db_index=True)
-    amount_issued = models.DecimalField(_("Amount Issued"), max_digits=15, decimal_places=2)
-    purpose = models.TextField(_("Purpose"))
-    project = models.ForeignKey('projects.Project', on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Related Project"), related_name="employee_advances")
-    # Use named function for default instead of lambda
-    date_due = models.DateField(
-        _("Liquidation/Repayment Due Date"),
-        default=get_default_advance_due_date # Reference the function here
-    )
-    status = models.CharField(_("Status"), max_length=25, choices=AdvanceStatus.choices, default=AdvanceStatus.ISSUED, db_index=True)
-    amount_liquidated = models.DecimalField(_("Amount Liquidated (Expenses)"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Portion of the advance accounted for by submitted expenses."))
-    amount_repaid = models.DecimalField(_("Amount Repaid (Cash)"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Portion of the advance returned as cash by the employee."))
-    class Meta: verbose_name = _("Employee Advance"); verbose_name_plural = _("Employee Advances"); ordering = ['-date_issued', 'employee']
-    def __str__(self): return f"Advance for {self.employee} ({self.amount_issued}) issued {self.date_issued}"
-    @property
-    def total_cleared(self): return self.amount_liquidated + self.amount_repaid
-    @property
-    def balance_remaining(self): return self.amount_issued - self.total_cleared
-    @property
-    def is_overdue(self):
-        if self.status in [self.AdvanceStatus.LIQUIDATED, self.AdvanceStatus.CANCELLED]: return False
-        if self.balance_remaining <= Decimal('0.00'): return False
-        # Ensure date_due is not None before comparing
-        if self.date_due is None: return False
-        return timezone.now().date() > self.date_due
-    def clean(self):
-        if self.total_cleared > self.amount_issued: raise ValidationError(_("Cleared amount (Liquidated + Repaid) cannot exceed issued amount."))
-        super().clean()
