@@ -1,6 +1,5 @@
 from django.contrib import admin
 from import_export.admin import ImportExportModelAdmin
-# Import EmployeeAdvance from accounts now
 from .models import ChartOfAccounts, DisbursementVoucher, EmployeeAdvance
 
 @admin.register(ChartOfAccounts)
@@ -13,63 +12,77 @@ class ChartOfAccountsAdmin(ImportExportModelAdmin):
 
 @admin.register(DisbursementVoucher)
 class DisbursementVoucherAdmin(ImportExportModelAdmin):
-    list_display = ('dv_number', 'dv_date', 'payee_name', 'amount', 'status', 'payment_method', 'check_number', 'bank_account', 'created_by')
+    list_display = ('dv_number', 'dv_date', 'payee_name', 'amount', 'status', 'payment_method', 'check_number', 'bank_account', 'get_created_by_username')
     list_filter = ('status', 'dv_date', 'payment_method', 'bank_account')
     search_fields = ('dv_number', 'payee_name', 'notes', 'check_number', 'bank_account__name')
-    readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by')
+    readonly_fields = ('created_at', 'updated_at', 'created_by', 'updated_by', 'get_created_by_username', 'get_updated_by_username')
     date_hierarchy = 'dv_date'
-    autocomplete_fields = ('bank_account', 'created_by', 'updated_by')
+    autocomplete_fields = ('bank_account',)
 
     fieldsets = (
          (None, {'fields': ('dv_number', 'dv_date', 'payee_name', 'amount', 'status')}),
          ('Payment Details', {'fields': ('payment_method', 'check_number', 'bank_account')}),
-         # Added 'notes' here as per model def
-         ('Auditing & Notes', {'fields': ('notes', 'created_at', 'created_by', 'updated_at', 'updated_by')}),
+         ('Auditing & Notes', {'fields': ('notes', 'created_at', 'get_created_by_username', 'updated_at', 'get_updated_by_username')}),
     )
 
-    # Added missing save_model override
+    @admin.display(description='Created By')
+    def get_created_by_username(self, obj):
+        return obj.created_by.username if obj.created_by else None
+
+    @admin.display(description='Updated By')
+    def get_updated_by_username(self, obj):
+        return obj.updated_by.username if obj.updated_by else None
+
+    # --- Revised save_model logic ---
     def save_model(self, request, obj, form, change):
-        """ Auto-populate audit fields """
-        if not obj.pk:
-            obj.created_by = request.user
+        """ Auto-populate audit fields using save-first approach. """
+        # Always set updated_by before any save
         obj.updated_by = request.user
+
+        # Save the object initially (or for changes)
+        # This populates obj.pk if it's a new instance
         super().save_model(request, obj, form, change)
 
-# --- EmployeeAdvance Admin Moved Here ---
+        # If it was a new object creation ('change' is False)
+        if not change:
+            # Set created_by *after* the initial save generated the PK
+            obj.created_by = request.user
+            # Save again, only updating the created_by field
+            obj.save(update_fields=['created_by'])
+    # --- End revised logic ---
+
+
 @admin.register(EmployeeAdvance)
 class EmployeeAdvanceAdmin(ImportExportModelAdmin):
-    list_display = (
-        'employee', 'date_issued', 'amount_issued', 'project', 'status',
-        'date_due', 'get_is_overdue_display', # Use display method
-        'balance_remaining', 'created_by'
-    )
+    list_display = ('advance_number', 'employee', 'date_issued', 'amount_issued', 'project', 'status', 'date_due', 'get_is_overdue_display', 'balance_remaining', 'get_created_by_username')
     list_filter = ('status', 'employee', 'project', 'date_issued', 'date_due')
-    search_fields = ('employee__first_name', 'employee__last_name', 'purpose', 'project__name', 'asset_account__name') # Search asset account
-    list_display_links = ('employee', 'date_issued')
-    readonly_fields = ('balance_remaining', 'created_at', 'updated_at', 'created_by', 'updated_by')
+    search_fields = ('advance_number', 'employee__first_name', 'employee__last_name', 'purpose', 'project__name', 'asset_account__name')
+    list_display_links = ('advance_number', 'employee')
+    readonly_fields = ('balance_remaining', 'created_at', 'updated_at', 'created_by', 'updated_by', 'get_created_by_username', 'get_updated_by_username')
     date_hierarchy = 'date_issued'
-    # Add asset_account to autocomplete
-    autocomplete_fields = ('employee', 'project', 'asset_account', 'created_by', 'updated_by')
+    autocomplete_fields = ('employee', 'project', 'asset_account',)
 
-    fieldsets = (
-        (None, {'fields': ('employee', 'asset_account', 'date_issued', 'amount_issued', 'purpose', 'project', 'date_due', 'status')}), # Added asset_account
-        ('Liquidation/Repayment', {'fields': ('amount_liquidated', 'amount_repaid', 'balance_remaining')}),
-        ('Auditing', {'fields': ('created_at', 'created_by', 'updated_at', 'updated_by')}),
-    )
+    def get_fieldsets(self, request, obj=None):
+        base_fieldsets = [
+            (None, {'fields': ('advance_number', 'employee', 'asset_account', 'date_issued', 'amount_issued', 'purpose', 'project', 'date_due', 'status')}),
+            ('Liquidation/Repayment', {'fields': ('amount_liquidated', 'amount_repaid', 'balance_remaining')}),
+        ]
+        audit_fields = ['created_at', 'get_created_by_username', 'updated_at', 'get_updated_by_username']
+        base_fieldsets.append(('Auditing', {'fields': audit_fields}))
+        return base_fieldsets
 
     @admin.display(description='Overdue?', boolean=True)
-    def get_is_overdue_display(self, obj):
-        return obj.is_overdue
+    def get_is_overdue_display(self, obj): return obj.is_overdue
+    @admin.display(description='Created By')
+    def get_created_by_username(self, obj): return obj.created_by.username if obj.created_by else None
+    @admin.display(description='Updated By')
+    def get_updated_by_username(self, obj): return obj.updated_by.username if obj.updated_by else None
 
+    # --- Revised save_model logic ---
     def save_model(self, request, obj, form, change):
-        """ Auto-populate audit fields """
-        if not obj.pk:
-            obj.created_by = request.user
-        # Assign default asset account if not set? Requires fetching the default CoA record.
-        # if not obj.asset_account:
-        #    try:
-        #        default_asset_acc = ChartOfAccounts.objects.get(account_subtype=ChartOfAccounts.AccountSubType.EMPLOYEE_ADVANCES, ...) # Add logic to find default
-        #        obj.asset_account = default_asset_acc
-        #    except ChartOfAccounts.DoesNotExist: pass # Handle case where default doesn't exist
         obj.updated_by = request.user
         super().save_model(request, obj, form, change)
+        if not change:
+            obj.created_by = request.user
+            obj.save(update_fields=['created_by'])
+    # --- End revised logic ---

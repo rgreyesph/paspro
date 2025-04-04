@@ -11,35 +11,35 @@ class AuditableModel(models.Model):
     created_at = models.DateTimeField(
         _("Created At"),
         auto_now_add=True,
-        editable=False # Should not be editable in forms
+        editable=False # Keep editable=False for timestamps
     )
     updated_at = models.DateTimeField(
         _("Updated At"),
         auto_now=True,
-        editable=False # Should not be editable in forms
+        editable=False # Keep editable=False for timestamps
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True, # Keep blank=True for flexibility (e.g., data migrations)
+        blank=True,
         related_name='%(app_label)s_%(class)s_created_by',
         verbose_name=_("Created By"),
-        editable=False # Make non-editable now that save_model handles it
+        # editable=False # Removed
     )
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
-        blank=True, # Keep blank=True
+        blank=True,
         related_name='%(app_label)s_%(class)s_updated_by',
         verbose_name=_("Updated By"),
-        editable=False # Make non-editable now that save_model handles it
+        # editable=False # Removed
     )
 
     class Meta:
-        abstract = True # Make this an abstract base class
-        ordering = ['-updated_at'] # Default ordering by most recently updated
+        abstract = True
+        ordering = ['-updated_at']
 
 
 # --- Existing Core Models ---
@@ -59,7 +59,6 @@ class Tag(models.Model):
         blank=True, # Optional field
         help_text=_("Optional description for the tag.")
     )
-    # Inheriting AuditableModel could be done here too if needed
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -106,7 +105,6 @@ class Address(models.Model):
         max_length=100,
         default="Philippines" # Sensible default, could use django-countries later
     )
-    # Note: No direct link back to owner here. Owner models will link *to* Address.
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -130,11 +128,25 @@ class Address(models.Model):
     @property
     def full_address(self):
         """Returns a formatted multi-line address string."""
-        lines = [self.street_line_1]
+        # --- Corrected Syntax ---
+        lines = []
+        if self.street_line_1:
+            lines.append(self.street_line_1)
         if self.street_line_2:
             lines.append(self.street_line_2)
-        city_state_zip = filter(None, [self.city, self.state_province_region])
-        lines.append(f"{' '.join(city_state_zip)} {self.postal_code or ''}".strip())
+
+        city_state_parts = filter(None, [self.city, self.state_province_region])
+        city_state_line = " ".join(city_state_parts)
+
+        postal_part = self.postal_code or ""
+
+        # Combine city/state/zip, handling potential spaces
+        city_state_zip = f"{city_state_line} {postal_part}".strip()
+        if city_state_zip: # Avoid adding an empty line if all parts are blank
+             lines.append(city_state_zip)
+
         if self.country:
             lines.append(self.country)
-        return "\n".join(filter(None, lines))
+
+        return "\n".join(lines)
+        # --- End Corrected Syntax ---

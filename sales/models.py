@@ -2,8 +2,8 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator
 from django.db.models import Sum
-from django.utils import timezone # For due date default
-from datetime import timedelta # For due date default
+from django.utils import timezone
+from datetime import timedelta
 from core.models import AuditableModel, Tag
 from persons.models import Customer
 from projects.models import Project
@@ -12,11 +12,9 @@ from accounts.models import ChartOfAccounts
 import uuid
 from decimal import Decimal
 
-# --- Function for default due date ---
 def get_default_invoice_due_date():
     """ Returns the date 30 days from now. """
     return timezone.now().date() + timedelta(days=30)
-# --- End Function ---
 
 class SalesInvoice(AuditableModel):
     """ Header for a Sales Invoice document. """
@@ -29,11 +27,8 @@ class SalesInvoice(AuditableModel):
     customer = models.ForeignKey(Customer, on_delete=models.PROTECT, verbose_name=_("Customer"))
     project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Project"), related_name="sales_invoices")
     invoice_number = models.CharField(_("Invoice Number"), max_length=50, unique=True, help_text=_("Unique number for this invoice."))
-    invoice_date = models.DateField(_("Invoice Date"), default=timezone.now, db_index=True) # Default invoice date to today
-    due_date = models.DateField(
-        _("Due Date"),
-        default=get_default_invoice_due_date # Use callable default
-    )
+    invoice_date = models.DateField(_("Invoice Date"), default=timezone.now, db_index=True)
+    due_date = models.DateField(_("Due Date"), default=get_default_invoice_due_date) # Use default
     status = models.CharField(_("Status"), max_length=10, choices=InvoiceStatus.choices, default=InvoiceStatus.DRAFT, db_index=True)
     subtotal = models.DecimalField(_("Subtotal"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Calculated from lines."))
     tax_amount = models.DecimalField(_("Tax Amount"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Calculated."))
@@ -52,24 +47,27 @@ class SalesInvoice(AuditableModel):
         lines = self.lines.all()
         new_subtotal = sum(line.line_total for line in lines if line.line_total is not None)
 
-        # --- Basic 12% Exclusive VAT Calculation ---
+        # Basic 12% Exclusive VAT Calculation (adjust rate/logic as needed)
         tax_rate = Decimal('0.12')
-        # Sum tax only from lines that are not exempt
-        new_tax_amount = sum(
-            (line.line_total * tax_rate)
-            for line in lines
+        vatable_total = sum(
+            line.line_total for line in lines
             if line.line_total is not None and not line.is_vat_exempt
         )
-        # --- End Tax Calculation ---
-
+        new_tax_amount = vatable_total * tax_rate
         new_total_amount = new_subtotal + new_tax_amount
 
+        # Ensure comparisons are between Decimals
+        current_subtotal = self.subtotal or Decimal('0.00')
+        current_tax = self.tax_amount or Decimal('0.00')
+        current_total = self.total_amount or Decimal('0.00')
+
         updated_fields = []
-        if self.subtotal != new_subtotal: self.subtotal = new_subtotal; updated_fields.append('subtotal')
-        # Use Decimal context for precision comparison
-        if self.tax_amount.compare(new_tax_amount.quantize(Decimal('0.01'))) != 0:
+        # Use quantize for consistent decimal comparison
+        if current_subtotal.compare(new_subtotal.quantize(Decimal('0.01'))) != 0:
+             self.subtotal = new_subtotal; updated_fields.append('subtotal')
+        if current_tax.compare(new_tax_amount.quantize(Decimal('0.01'))) != 0:
              self.tax_amount = new_tax_amount; updated_fields.append('tax_amount')
-        if self.total_amount.compare(new_total_amount.quantize(Decimal('0.01'))) != 0:
+        if current_total.compare(new_total_amount.quantize(Decimal('0.01'))) != 0:
              self.total_amount = new_total_amount; updated_fields.append('total_amount')
 
         if save and updated_fields:
@@ -88,18 +86,21 @@ class SalesInvoice(AuditableModel):
         new_status = self.status
         if self.status not in [self.InvoiceStatus.VOID, self.InvoiceStatus.DRAFT]:
             current_total = self.total_amount or Decimal('0.00')
-            balance = current_total - new_amount_paid
+            # Ensure balance calculation uses Decimal
+            balance = current_total - new_amount_paid.quantize(Decimal('0.01'))
+
             if balance <= Decimal('0.00') and current_total > Decimal('0.00'):
                 new_status = self.InvoiceStatus.PAID
             elif new_amount_paid > Decimal('0.00') and balance > Decimal('0.00'):
                  new_status = self.InvoiceStatus.PARTIAL
             elif new_amount_paid == Decimal('0.00'):
                  if self.status in [self.InvoiceStatus.PARTIAL, self.InvoiceStatus.PAID]:
-                     # Revert to SHIPPED if it was shipped, otherwise SENT
                      new_status = self.InvoiceStatus.SHIPPED if self.status == self.InvoiceStatus.SHIPPED else self.InvoiceStatus.SENT
 
         updated_fields = []
-        if self.amount_paid.compare(new_amount_paid.quantize(Decimal('0.01'))) != 0:
+        # Ensure comparison uses Decimal
+        current_paid = self.amount_paid or Decimal('0.00')
+        if current_paid.compare(new_amount_paid.quantize(Decimal('0.01'))) != 0:
             self.amount_paid = new_amount_paid
             updated_fields.append('amount_paid')
         if self.status != new_status:
@@ -110,14 +111,13 @@ class SalesInvoice(AuditableModel):
             self.save(update_fields=updated_fields)
         return bool(updated_fields)
 
-
 class SalesInvoiceLine(models.Model):
     """ Line item detail for a Sales Invoice. """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(SalesInvoice, on_delete=models.CASCADE, related_name='lines', verbose_name=_("Sales Invoice"))
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Product/Service"), related_name='invoice_lines')
-    # Make description optional
-    description = models.TextField(_("Description"), blank=True, help_text=_("Detailed description of item/service sold (if not using product)."))
+    # Make description optional (blank=True)
+    description = models.TextField(_("Description"), blank=True, help_text=_("Detailed description of item/service sold (fills from product if blank)."))
     warehouse = models.ForeignKey('inventory.Warehouse', on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Source Warehouse"), limit_choices_to={'is_active': True}, help_text=_("Warehouse stock is drawn from (for inventory items)."))
     quantity = models.DecimalField(_("Quantity"), max_digits=15, decimal_places=4, default=Decimal('1.0'))
     unit_price = models.DecimalField(_("Unit Price"), max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
@@ -128,11 +128,9 @@ class SalesInvoiceLine(models.Model):
     class Meta: verbose_name = _("Sales Invoice Line"); verbose_name_plural = _("Sales Invoice Lines"); ordering = ['invoice', 'id']
 
     def save(self, *args, **kwargs):
-        if not self.description and self.product: # Autofill description if empty and product selected
-            self.description = self.product.name
+        if not self.description and self.product: self.description = self.product.name # Autofill description
         if self.quantity is not None and self.unit_price is not None: self.line_total = self.quantity * self.unit_price
-        if self.product and self.product.track_inventory and not self.warehouse:
-             raise ValidationError({'warehouse': _("Warehouse must be selected for inventory item '%(product)s'.") % {'product': self.product.name}})
+        if self.product and self.product.track_inventory and not self.warehouse: raise ValidationError({'warehouse': _("Warehouse must be selected for inventory item '%(product)s'.") % {'product': self.product.name}})
         if self.product and not self.product.track_inventory: self.warehouse = None
         super().save(*args, **kwargs)
 
