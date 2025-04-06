@@ -12,11 +12,8 @@ def get_default_advance_due_date():
     return timezone.now().date() + timedelta(days=7)
 
 class ChartOfAccounts(models.Model):
-    class AccountType(models.TextChoices): # ... (no changes needed here) ...
-        ASSET = 'ASSET', _('Asset'); LIABILITY = 'LIABILITY', _('Liability')
-        EQUITY = 'EQUITY', _('Equity'); REVENUE = 'REVENUE', _('Revenue')
-        EXPENSE = 'EXPENSE', _('Expense')
-    class AccountSubType(models.TextChoices): # ... (ensure CASH, CREDIT_CARD_PAYABLE, EMPLOYEE_ADVANCES exist) ...
+    class AccountType(models.TextChoices): ASSET = 'ASSET', _('Asset'); LIABILITY = 'LIABILITY', _('Liability'); EQUITY = 'EQUITY', _('Equity'); REVENUE = 'REVENUE', _('Revenue'); EXPENSE = 'EXPENSE', _('Expense')
+    class AccountSubType(models.TextChoices):
         BANK = 'BANK', _('Bank'); CASH = 'CASH', _('Cash / Petty Cash')
         ACCOUNTS_RECEIVABLE = 'ACCOUNTS_RECEIVABLE', _('Accounts Receivable (A/R)')
         EMPLOYEE_ADVANCES = 'EMPLOYEE_ADVANCES', _('Employee Advances (Asset)')
@@ -53,38 +50,42 @@ class ChartOfAccounts(models.Model):
         super().clean()
 
 class DisbursementVoucher(AuditableModel):
-    class DVStatus(models.TextChoices): PREPARED = 'PREPARED', _('Prepared'); APPROVED = 'APPROVED', _('Approved'); PAID = 'PAID', _('Paid'); CANCELLED = 'CANCELLED', _('Cancelled')
+    """ Represents an authorization to disburse funds, often linked to Bills. """
+    # Added PENDING_APPROVAL_2
+    class DVStatus(models.TextChoices):
+        DRAFT = 'DRAFT', _('Draft')
+        PENDING_APPROVAL = 'PENDING_APPROVAL', _('Pending Approval (L1)') # Clarified Level
+        PENDING_APPROVAL_2 = 'PENDING_APPROVAL_2', _('Pending Approval (L2)') # Added L2 Pending
+        APPROVED = 'APPROVED', _('Approved (Ready to Pay)')
+        REJECTED = 'REJECTED', _('Rejected')
+        PAID = 'PAID', _('Paid')
+        CANCELLED = 'CANCELLED', _('Cancelled')
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     dv_number = models.CharField(_("DV Number"), max_length=50, unique=True, help_text=_("Unique number identifying this disbursement voucher."))
     dv_date = models.DateField(_("DV Date"), db_index=True)
     payee_name = models.CharField(_("Payee Name"), max_length=255, help_text=_("Name of the vendor, employee, or other payee."))
     amount = models.DecimalField(_("Disbursement Amount"), max_digits=15, decimal_places=2)
+    project = models.ForeignKey('projects.Project', on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Related Project"), related_name="disbursement_vouchers", help_text=_("Link to a project if this DV is specifically for it."))
     payment_method = models.CharField(_("Payment Method"), max_length=50, blank=True, help_text=_("e.g., Check, Bank Transfer, Cash"))
-    # Renamed verbose_name
-    check_number = models.CharField(
-        _("Check/Reference Number"), max_length=50, blank=True,
-        help_text=_("Check number or digital wallet transaction reference") # Updated help text
+    check_number = models.CharField(_("Check/Reference Number"), max_length=50, blank=True, help_text=_("Check number or digital wallet transaction reference"))
+    bank_account = models.ForeignKey(ChartOfAccounts, on_delete=models.SET_NULL, null=True, blank=True, verbose_name=_("Bank/Cash Account Disbursed From"), limit_choices_to={'is_active': True, 'account_subtype__in': [ChartOfAccounts.AccountSubType.BANK, ChartOfAccounts.AccountSubType.CASH]})
+    # Updated max_length for new status
+    status = models.CharField(
+        _("Status"), max_length=20, choices=DVStatus.choices, # Increased max_length
+        default=DVStatus.DRAFT, db_index=True
     )
-    bank_account = models.ForeignKey(
-        ChartOfAccounts, on_delete=models.SET_NULL, null=True, blank=True,
-        verbose_name=_("Bank/Cash Account Disbursed From"),
-        limit_choices_to={'is_active': True, 'account_subtype__in': [
-            ChartOfAccounts.AccountSubType.BANK, ChartOfAccounts.AccountSubType.CASH
-        ]}
-    )
-    status = models.CharField(_("Status"), max_length=10, choices=DVStatus.choices, default=DVStatus.PREPARED, db_index=True)
     notes = models.TextField(_("Notes/Purpose"), blank=True)
+    initiator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, editable=False, related_name='initiated_dvs', verbose_name=_("Initiator"))
+    approved_by_1 = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, editable=False, related_name='first_approved_dvs', verbose_name=_("Approver 1"))
+    approved_by_final = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, editable=False, related_name='final_approved_dvs', verbose_name=_("Final Approver"))
     class Meta: verbose_name = _("Disbursement Voucher"); verbose_name_plural = _("Disbursement Vouchers"); ordering = ['-dv_date', '-dv_number']
     def __str__(self): return f"DV {self.dv_number} - {self.payee_name} ({self.amount})"
 
 class EmployeeAdvance(AuditableModel):
     class AdvanceStatus(models.TextChoices): ISSUED = 'ISSUED', _('Issued'); PARTIALLY_LIQUIDATED = 'PARTIALLY_LIQUIDATED', _('Partially Liquidated/Repaid'); LIQUIDATED = 'LIQUIDATED', _('Fully Liquidated/Repaid'); CANCELLED = 'CANCELLED', _('Cancelled')
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # Added advance_number
-    advance_number = models.CharField(
-        _("Advance Number"), max_length=50, unique=True, blank=True, null=True, # Make unique, optional for now
-        help_text=_("Unique number identifying this cash advance.")
-    )
+    advance_number = models.CharField(_("Advance Number"), max_length=50, unique=True, blank=True, null=True, help_text=_("Unique number identifying this cash advance."))
     employee = models.ForeignKey('persons.Employee', on_delete=models.PROTECT, verbose_name=_("Employee"), related_name="advances")
     date_issued = models.DateField(_("Date Issued"), default=timezone.now, db_index=True)
     amount_issued = models.DecimalField(_("Amount Issued"), max_digits=15, decimal_places=2)
@@ -94,27 +95,13 @@ class EmployeeAdvance(AuditableModel):
     status = models.CharField(_("Status"), max_length=25, choices=AdvanceStatus.choices, default=AdvanceStatus.ISSUED, db_index=True)
     amount_liquidated = models.DecimalField(_("Amount Liquidated (Expenses)"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Portion of the advance accounted for by submitted expenses."))
     amount_repaid = models.DecimalField(_("Amount Repaid (Cash)"), max_digits=15, decimal_places=2, default=Decimal('0.00'), help_text=_("Portion of the advance returned as cash by the employee."))
-    asset_account = models.ForeignKey(
-         ChartOfAccounts, on_delete=models.PROTECT, verbose_name=_("Asset Account"),
-         null=True, blank=True, # Allow blank
-         limit_choices_to={'account_subtype': ChartOfAccounts.AccountSubType.EMPLOYEE_ADVANCES},
-         help_text=_("The specific 'Employee Advances' asset account this pertains to.")
-    )
+    asset_account = models.ForeignKey(ChartOfAccounts, on_delete=models.PROTECT, verbose_name=_("Asset Account"), null=True, blank=True, limit_choices_to={'account_subtype': ChartOfAccounts.AccountSubType.EMPLOYEE_ADVANCES}, help_text=_("The specific 'Employee Advances' asset account this pertains to."))
     class Meta: verbose_name = _("Employee Advance"); verbose_name_plural = _("Employee Advances"); ordering = ['-date_issued', 'employee']
-    def __str__(self): return f"Advance {self.advance_number or self.id} for {self.employee}" # Use number if available
-
+    def __str__(self): return f"Advance {self.advance_number or self.id} for {self.employee}"
     @property
-    def total_cleared(self):
-        liq = self.amount_liquidated or Decimal('0.00')
-        rep = self.amount_repaid or Decimal('0.00')
-        return liq + rep
-
+    def total_cleared(self): liq = self.amount_liquidated or Decimal('0.00'); rep = self.amount_repaid or Decimal('0.00'); return liq + rep
     @property
-    def balance_remaining(self):
-        # Fixed TypeError check for None
-        issued = self.amount_issued or Decimal('0.00')
-        return issued - self.total_cleared
-
+    def balance_remaining(self): issued = self.amount_issued or Decimal('0.00'); return issued - self.total_cleared
     @property
     def is_overdue(self):
         if self.status in [self.AdvanceStatus.LIQUIDATED, self.AdvanceStatus.CANCELLED]: return False
@@ -122,6 +109,5 @@ class EmployeeAdvance(AuditableModel):
         if self.date_due is None: return False
         return timezone.now().date() > self.date_due
     def clean(self):
-        if self.total_cleared > (self.amount_issued or Decimal('0.00')):
-            raise ValidationError(_("Cleared amount (Liquidated + Repaid) cannot exceed issued amount."))
+        if self.total_cleared > (self.amount_issued or Decimal('0.00')): raise ValidationError(_("Cleared amount (Liquidated + Repaid) cannot exceed issued amount."))
         super().clean()
